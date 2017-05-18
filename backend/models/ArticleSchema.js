@@ -14,9 +14,14 @@ const ArticleSchema = new Schema({
         type: String,
         required: false,
         default: 'anonymous'
-    }
+    },
+    created_at: {
+        type: String,
+        required: false,
+        default: new Date()
+    },
+    comments: [CommentSchema]
 });
-// , comments: [CommentSchema]
 let Article = mongoose.model('Article', ArticleSchema);
 
 export default Article;

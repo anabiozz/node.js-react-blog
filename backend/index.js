@@ -6,37 +6,70 @@ import cookieParser from 'cookie-parser';
 import bodyParser from 'body-parser';
 import { blog } from './controllers';
 import db from 'mongoose';
+import webpackDevMiddleware from 'webpack-dev-middleware';
+import webpackHotMiddleware from 'webpack-hot-middleware';
+import async from 'async';
+
+import ServerRenderingMiddleware from './middleware/serverSideRendering';
 
 import config from './configs/config';
 
 var app = express();
 
-const host = process.env.NODE_ENV == 'development'?config.server.develop:config.server.production
-const port = config.server.port
+const host = process.env.NODE_ENV == 'development'?config.server.develop:config.server.production;
+const port = config.server.port;
 
-// uncomment after placing your favicon in /public
-//app.use(favicon(path.join(__dirname, 'public', 'favicon.ico')));
+function parallel(middlewares) {
+    return function(req, res, next) {
+        async.each(middlewares, function(mw, cb) {
+            mw(req, res, cb);
+        }, next);
+    };
+}
+
 app.use(logger('dev'));
-app.use(bodyParser.urlencoded({
-    extended: true
-}));
-app.use(bodyParser.json());
-app.use(cookieParser());
 
-app.use(express.static(path.join(__dirname, '../frontend')));
+var webpackConfig = null;
+if (process.env.NODE_ENV == 'development') {
+    webpackConfig = require('../webpack.dev');
+} else {
+    webpackConfig = require('../webpack.prod');
+}
+var compiler = webpack(webpackConfig);
+
+// TO DELETE IN PRODUCTION!!!
+app.use(function(req, res, next) {
+    console.log('TRY ADD HEADERS FOR REQUEST ' + req.url);
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    next();
+});
+
+if (process.env.NODE_ENV == 'production') {
+    app.use('*.js', setBundleHeaders); // USE GZIP COMPRESSION FOR PRODUCTION BUNDLE
+    app.use(root+'dist', express.static(__dirname + '/../dist'));
+} else {
+    app.use(webpackDevMiddleware(compiler, { noInfo: true, publicPath: webpackConfig.output.publicPath }));
+    app.use(webpackHotMiddleware(compiler));
+}
+app.use(root+'css', express.static(__dirname + '/static/css'));
+app.use(root+'images', express.static(__dirname + '/static/images'));
+app.use(root+'favicon.ico', express.static(__dirname + '/static/images/favicon.ico'));
+app.use(parallel([
+    ServerRenderingMiddleware,
+    bodyParser.json(),
+    cookieParser(),
+    bodyParser.urlencoded({
+        extended: false
+    })
+]));
+
 app.use('/css', express.static(__dirname + '/static/css'));
 app.get('/blog', blog.getAllPosts);
 app.get('/blog/new', blog.blog);
 app.post('/blog/new', blog.newPost);
 app.get('/blog/:id', blog.blog);
 app.post('/blog/addComment', blog.blog);
-
-// catch 404 and forward to error handler
-// app.use(function(req, res, next) {
-//   var err = new Error('Not Found');
-//   err.status = 404;
-//   next(err);
-// });
 
 db.Promise = global.Promise;
 db.connect('mongodb://' + config.database.host + '/' + config.database.db);
